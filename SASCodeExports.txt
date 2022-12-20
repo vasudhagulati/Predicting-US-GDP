@@ -1,0 +1,81 @@
+proc import out = export datafile="/home/u60891813/sasuser.v94/Consolidated Data_Final.xlsx"
+dbms= xlsx replace;
+run;
+
+proc sgplot data= export;
+ series x = date y = Exports;
+ 	title "Total Export ";
+	xaxis label = "Quarterely ";
+	yaxis label = "Export";
+run;
+
+PROC TIMESERIES DATA = export plots = acf out=_null_;
+	var Exports;
+	corr acf/nlag=48;
+run;
+
+/* The data exibit the only Trend component So we choose between Holt's or Damped Trend model for model building*/
+
+
+proc esm data = export print=all lead=29 back=29 plot= forecasts out=_null_ outfor=ExportoutH ;
+	forecast Exports/model=linear;
+run;
+
+proc esm data = export print=all lead=29 back=29 plot= forecasts out=_null_ outfor=ExportoutD ;
+	forecast Exports/model=DAMPTREND;
+run;
+
+data export;
+	set export;
+	t=_n_;
+	export_new=Exports;
+	if t > 114 then export_new=.;
+run;
+/* Linear fit*/
+proc reg data = export outest=export1;
+	model export_new=t/aic bic adjrsq;
+	output out=Exports_out1 r=Exports_resid1 p= Exports_pred1;
+run;
+
+data Exports_out1;
+	set Exports_out1;
+	mape_fit = (abs(Exports_resid1)/export_new)*100;
+	if t>114 then mape_acc = (abs(Exports_pred1-Exports)/Exports)*100;
+run;
+
+proc means data = Exports_out1 mean;
+ var mape_fit mape_acc;
+run;
+
+proc sgplot data = Exports_out1;
+	 series x =date y= Exports;
+	 series x =date y= Exports_pred1;
+run;
+
+/*ARIMA*/
+
+proc arima data=export;
+	identify var=export_new(1) nlag=36 whitenoise=ignoremiss;
+   	estimate p=5 whitenoise=ignoremiss; /* ARIMA(4,1,0) */
+    forecast id=date interval=qtr out=exportout;
+run;
+
+data export_merge ;
+	merge exportout export;
+run;
+
+data Exports_out2;
+	set export_merge;
+mape_FIT = (abs(RESIDUAL)/export_new)*100;
+if t>114 then mape_acc = (abs(FORECAST-Exports)/Exports)*100;
+RUN;
+
+proc means data = Exports_out2 mean;
+ var mape_FIT mape_acc;
+run;
+
+proc sgplot data = exportout;
+	 series x =date y= export_new;
+	 series x =date y= forecast;
+run;
+

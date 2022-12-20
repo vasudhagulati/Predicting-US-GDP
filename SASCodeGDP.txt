@@ -1,0 +1,124 @@
+/* GDP */
+proc import out=usgdp datafile="/home/u62188546/sasuser.v94/Project Files/Consolidated Data_Final.xlsx"
+dbms=xlsx replace;
+run;
+
+/* the sgplot */
+proc sgplot data=usgdp;
+	series x=date y=GDP; 
+run;
+
+/* ACF plot */
+proc timeseries data=usgdp plots=acf out=_null_;
+	var GDP;
+	corr acf/nlag=52;
+run;
+
+/* Holt's Model */
+proc esm data=usgdp print=all lead=29 back=29 plot= forecasts out=_null_ outfor=usgdpout1 ;
+	forecast GDP/model=linear;
+run;
+
+/* Damped Model */
+proc esm data=usgdp print=all lead=29 back=29 plot= forecasts out=_null_ outfor=usgdpout2 ;
+	forecast GDP/model=damptrend;
+run;
+
+/* Simple Linear Regression Model */
+data usgdp;
+	set usgdp;
+	t=_n_;
+	GDP_new=GDP;
+	if t>114 then GDP_new=.;
+run;
+
+proc reg data=usgdp outest=usgdp1;
+	model GDP_new=t/aic bic clb vif adjrsq dwprob;
+	output out=GDPout1 r=GDPr p= GDPp;
+run;
+
+data GDPout1;
+	set GDPout1;
+	mape_fit=(abs(GDPr)/GDP_new)*100;
+	if t>114 then mape_acc=(abs(GDPp-GDP)/GDP)*100;
+run;
+
+proc means data=GDPout1 mean;
+ var mape_fit mape_acc;
+run;
+
+proc sgplot data=GDPout1;
+	 series x=date y=GDP;
+	 series x=date y=GDPp;
+run;
+
+
+/*ARIMA - GDP*/
+
+data project;
+set project;
+t=_n_;
+gdp_new=gdp;
+if t > 114 then gdp_new=.;
+run;
+
+proc arima data=project;
+identify var=gdp_new(1) nlag=36 whitenoise=ignoremiss;
+    estimate p=3 whitenoise=ignoremiss; /* ARIMA(3,1,0) */
+    forecast id=date interval=qtr out=projectout;
+run;
+
+data project_merge ;
+merge projectout export;
+run;
+
+data project_out2;
+set project_merge;
+mape_FIT = (abs(RESIDUAL)/gdp_new)*100;
+if t>114 then mape_acc = (abs(FORECAST-gdp)/gdp)*100;
+RUN;
+
+proc means data = project_out2 mean;
+ var mape_FIT mape_acc;
+run;
+
+proc sgplot data = projectout;
+series x =date y= export_new;
+series x =date y= forecast;
+run;
+
+
+
+/*Multiple regression GDP*/
+
+proc sgplot data= Export;
+ series x=date y= GDP;
+ run;
+
+
+PROC TIMESERIES DATA = export plots = acf out=_null_;
+	var GDP;
+	corr acf/nlag=48;
+run;
+
+Data gdp_pred;
+ set export;
+ interraction_term1 = CPI*IMPORTS;
+ interraction_term2 = CPI*EXPORTS;
+RUN;
+
+
+proc reg data=EXPORT outest=gdp1;
+	model GDP = exportS CPI Imports/clb corrb vif aic bic adjrsq;
+	output out=GDPoutput p=gdp_pred r=gdp_resid;
+run;
+
+proc reg data=gdp_pred outest=gdp3;
+	model GDP = Exports CPI interraction_term1/clb corrb vif aic bic adjrsq;
+	output out=GDPoutput p=gdp_pred r=gdp_resid;
+run;
+
+proc reg data=gdp_pred outest=gdp2;
+	model GDP = IMPORTS CPI interraction_term2/clb corrb vif aic bic adjrsq dwprob;
+	output out=GDPoutput p=gdp_pred r=gdp_resid;
+run;

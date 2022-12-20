@@ -1,0 +1,92 @@
+/*Import data and analyze variable CPI*/
+proc import out=project datafile="/home/u62197416/sasuser.v94/Consolidated Data.xlsx"
+dbms=xlsx replace;
+run;
+
+proc sgplot data=project;
+	series x=date y=cpi;
+	title "Quarterly US CPI % Change";
+	xaxis label="Quarter";
+	yaxis label="CPI (%QoQ)";
+run;
+
+proc timeseries data=project plots=acf out=_null_;
+	var cpi;
+	corr acf/nlag=48;
+run;
+
+/***************************************************************************************/
+/* Simple Exponential Smoothing*/
+
+proc esm data=project print=all outfor=outproj lead=2 out=_null_ plot=forecasts;
+	forecast cpi/model=simple;
+run;
+
+proc sgplot data=outproj;
+	series x=_timeid_ y=actual;
+	series x=_timeid_ y=predict;
+run;
+
+/***************************************************************************************/
+
+/*Creating 3 and 5 period moving average data points */
+proc expand data=project  out=project_ma;
+	id date;
+	convert cpi=moving_average3/transout=(movave 3);
+	convert cpi=moving_average5/transout=(movave 5);
+	convert cpi=moving_average8/transout=(movave 8);
+run;
+
+/*Plotting new moving averages with original time series for comparison*/
+proc sgplot data=project_ma;
+	series x=date y=cpi;
+	series x=date y=moving_average3;
+		label moving_average3="MA3";
+	series x=date y=moving_average5;
+		label moving_average5="MA5";
+	series x=date y=moving_average8;
+		label moving_average5="MA8";
+run;
+	
+/*Calculating MAPE of model fit which average is better?*/
+data project_ma;
+	set project_ma;
+	ape3=(abs(cpi-moving_average3)/cpi)*100;
+	ape5=(abs(cpi-moving_average5)/cpi)*100;
+	ape8=(abs(cpi-moving_average8)/cpi)*100;
+run;
+
+proc means data=project_ma mean;
+	var ape3;
+	var ape5;
+	var ape8;
+run;
+/***************************************************************************************/
+/* Winter’s Model */
+/* Multiplicative method */
+proc esm data=project plot=forecasts lead=29 back=29 print=all outfor=outproject out=_null_;
+	id date interval=qtr;
+	forecast cpi/model=winters;
+run;
+
+/* Additive method */
+proc esm data=project plot=forecasts lead=29 back=29 print=all outfor=outproject1 out=_null_;
+	id date interval=qtr;
+	forecast cpi/model=addwinters;
+run;
+
+
+/***************************************************************************************/
+/*ARIMA*/
+proc arima data=project;
+	identify var=cpi(4) nlag=48 whitenoise=ignoremiss; /*(4) does quarterly seasonal differencing is monthly*/
+	estimate p=(3)(4)(8) q=(2)	whitenoise=ignoremiss;/*ARIMA(3,0,2)(2,1,0)4   () denotes seasonal in code*/
+	estimate p=(4)(8) q=(1)	whitenoise=ignoremiss;/*ARIMA(0,0,1)(2,1,0)4   () denotes seasonal in code*/
+	estimate p=(4) q=(1)	whitenoise=ignoremiss;/*ARIMA(0,0,1)(1,1,0)4   () denotes seasonal in code*/
+	forecast id=date interval=qtr lead=2 out=out_project;
+run;
+
+proc sgplot data=out_project;
+	series x=date y=cpi;
+	series x=date y=forecast;
+run;
